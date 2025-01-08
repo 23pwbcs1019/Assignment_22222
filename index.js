@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 
-const mongo_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/hello02';
+const mongo_URI = 'mongodb+srv://23pwbcs1019:zuM0WMhOAqnKccPL@cluster0.jjtu0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 const JWT_SECRET = process.env.JWT_ACCESS_TOKEN;
 
 if (!JWT_SECRET) {
@@ -24,6 +24,11 @@ if (!JWT_SECRET) {
 mongoose.connect(mongo_URI)
   .then(() => console.log("MongoDB connected successfully"))
   .catch((error) => console.error(`MongoDB connection error: ${error}`));
+
+
+  app.get('/',(req,res)=>{
+    res.json("Web Programming Assignment No 2  ")
+  })
 
 // For signUp
 app.post('/api/signup', async (req, res) => {
