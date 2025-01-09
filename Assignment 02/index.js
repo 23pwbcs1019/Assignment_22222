@@ -2,160 +2,142 @@ import express from 'express';
 import mongoose from 'mongoose';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import Signup from './Schemas/SignupSchema.js';
 import { configDotenv } from 'dotenv';
-import { compare } from 'bcrypt';
+import Signup from './Schemas/SignupSchema.js'; // Ensure the path is correct
 
+// Load environment variables from .env file
 configDotenv();
 
+// Server setup
 const app = express();
 const PORT = process.env.PORT || 8080;
-
-app.use(express.json());
-
-const mongo_URI = 'mongodb+srv://23pwbcs1019:zuM0WMhOAqnKccPL@cluster0.jjtu0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 const JWT_SECRET = process.env.JWT_ACCESS_TOKEN;
 
-if (!JWT_SECRET) {
-  console.error('JWT_SECRET is not defined in environment variables');
-  process.exit(1);
-}
+// Middleware
+app.use(express.json());
 
-mongoose.connect(mongo_URI)
-  .then(() => console.log("MongoDB connected successfully"))
-  .catch((error) => console.error(`MongoDB connection error: ${error}`));
-
-
-  app.get('/',(req,res)=>{
-    res.json("Web Programming Assignment No 2  ")
-  })
-
-// For signUp
-app.post('/api/signup', async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-
-    if (!name?.trim() || !email?.trim() || !password) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
-
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ message: "Invalid email format" });
-    }
-
-    // Password strength validation
-    if (password.length < 8) {
-      return res.status(400).json({ message: "Password must be at least 8 characters long" });
-    }
-
-    const existingUser = await Signup.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
-      return res.status(409).json({ message: "User already registered with this email" });
-    }
-
-    const saltRounds = 12; // Increased from 8 for better security
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-    
-    const newUser = new Signup({
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
-      password: hashedPassword
-    });
-    
-    await newUser.save();
-    res.status(201).json({ message: "User registered successfully" });
-  } catch (error) {
-    console.error('Signup error:', error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-// For signIn
-app.post('/api/signin', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email?.trim() || !password) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
-
-    const user = await Signup.findOne({ email: email.toLowerCase().trim() });
-    if (!user) {
-      // Use vague message for security
-      return res.status(401).json({ message: "User Not Found" });
-    }
-
-    const isPasswordValid = await compare(password, user.password);
-    console.log("password", password);
-    console.log("hashed password", user.password);
-    if (!isPasswordValid) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const token = jwt.sign(
-      { 
-        id: user._id,
-        email: user.email
-      },
-      JWT_SECRET,
-      { 
-        expiresIn: '1h',
-        algorithm: 'HS256'
-      }
-    );
-
-    res.status(200).json({ 
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email
-      }
-    });
-  } catch (error) {
-    console.error('Signin error:', error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-// Middleware to verify JWT
-const authenticateToken = (req, res, next) => {
-  try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.startsWith('Bearer ') ? 
-      authHeader.slice(7) : null;
+// JWT verification middleware
+const verifyToken = (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
 
     if (!token) {
-      return res.status(401).json({ message: "Access denied. No token provided." });
+        return res.status(401).json({ message: "No token provided" });
     }
 
-    jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }, (err, decoded) => {
-      if (err) {
-        if (err.name === 'TokenExpiredError') {
-          return res.status(401).json({ message: "Token expired" });
-        }
-        return res.status(403).json({ message: "Invalid token" });
-      }
-      req.user = decoded;
-      next();
-    });
-  } catch (error) {
-    console.error('Auth middleware error:', error);
-    res.status(500).json({ message: "Internal server error" });
-  }
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (error) {
+        return res.status(401).json({ message: "Invalid token" });
+    }
 };
 
-// Protected route example
-app.get('/api/protected', authenticateToken, (req, res) => {
-  res.status(200).json({
-    message: "Access granted",
-    user: {
-      id: req.user.id,
-      email: req.user.email
+// Routes
+app.post('/api/signup', async (req, res) => {
+    const { name, email, password } = req.body;
+
+    try {
+        // Validation
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: "All fields are required" });
+        }
+
+        // Check if the user already exists
+        const existingUser = await Signup.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: "User already registered with this email" });
+        }
+
+        // Hash password and create user
+        const saltRounds = 8;
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        const newUser = new Signup({ name, email, password: hashedPassword });
+        await newUser.save();
+
+        // Generate JWT
+        const token = jwt.sign(
+            { userId: newUser._id, email: newUser.email },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.status(201).json({
+            message: "User registered successfully",
+            token: token
+        });
+    } catch (error) {
+        console.log(`Error occurred: ${error}`);
+        res.status(500).json({ message: "Error registering user" });
     }
-  });
 });
 
-app.listen(PORT, () => console.log(`Server is listening on port ${PORT}`));
+app.post("/api/signin", async (req, res) => {
+    const { email, password } = req.body;
+
+    try {
+        // Validation
+        if (!email || !password) {
+            return res.status(400).json({ message: "All fields are required" });
+        }
+
+        // Find user and verify password
+        const user = await Signup.findOne({ email });
+        if (!user) {
+            return res.status(401).json({ message: "Invalid credentials" });
+        }
+
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        if (!isValidPassword) {
+            return res.status(401).json({ message: "Invalid credentials" });
+        }
+
+        // Generate JWT
+        const token = jwt.sign(
+            { userId: user._id, email: user.email },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.status(200).json({
+            message: "Logged in successfully",
+            token: token
+        });
+    } catch (error) {
+        console.log(`Error occurred: ${error}`);
+        res.status(500).json({ message: "Error signing in. Please try again" });
+    }
+});
+
+// Protected route
+app.get("/api/protected", verifyToken, async (req, res) => {
+    try {
+        const user = await Signup.findById(req.user.userId).select('-password');
+        res.json({
+            message: "Access granted to protected route",
+            user: user
+        });
+    } catch (error) {
+        console.log(`Error occurred: ${error}`);
+        res.status(500).json({ message: "Error accessing protected route" });
+    }
+});
+
+// MongoDB connection
+const mongo_URI = process.env.MONGO_URI;
+
+mongoose.connect(mongo_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => {
+        console.log("MongoDB connected successfully");
+    })
+    .catch((err) => {
+        console.error("MongoDB connection error:", err);
+    });
+
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+});
+
+// Export the Express app for Vercel
+export default app;
